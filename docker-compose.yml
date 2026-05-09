@@ -1,0 +1,106 @@
+name: hq
+
+services:
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootlocaldev}
+      MARIADB_DATABASE: ${DB_NAME:-hq}
+      MARIADB_USER: ${DB_USER:-hq}
+      MARIADB_PASSWORD: ${DB_PASSWORD:-hqlocaldev}
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    volumes:
+      - db_data:/var/lib/mysql
+    networks: [hq]
+    ports:
+      - "127.0.0.1:3306:3306"
+
+  admin:
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
+    image: hq-admin:local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_NAME: HQ-Admin
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_URL: http://localhost:8081
+      APP_KEY: ${APP_KEY_ADMIN:-base64:q4nAVqEAbFu9j++UuW67PZh4eCg71xxFRYthB2SikOc=}
+      LOG_CHANNEL: stderr
+      LOG_LEVEL: debug
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_DATABASE: ${DB_NAME:-hq}
+      DB_USERNAME: ${DB_USER:-hq}
+      DB_PASSWORD: ${DB_PASSWORD:-hqlocaldev}
+      SESSION_DRIVER: database
+      SESSION_LIFETIME: 120
+      CACHE_STORE: database
+      QUEUE_CONNECTION: sync
+      DB_OWNER: "true"
+      RUN_MIGRATIONS: "true"
+      RUN_SEEDERS: "true"
+    ports:
+      - "127.0.0.1:8081:8080"
+    networks: [hq]
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    image: hq-api:local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      admin:
+        condition: service_started
+    environment:
+      APP_NAME: HQ-API
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_URL: http://localhost:8080
+      APP_KEY: ${APP_KEY_API:-base64:naJ3OY6MePDAv9VNSVhQxoF9DnbbVSponKqNwk0XVlI=}
+      LOG_CHANNEL: stderr
+      LOG_LEVEL: debug
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_DATABASE: ${DB_NAME:-hq}
+      DB_USERNAME: ${DB_USER:-hq}
+      DB_PASSWORD: ${DB_PASSWORD:-hqlocaldev}
+      DB_OWNER: "false"
+      RUN_MIGRATIONS: "false"
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks: [hq]
+
+  adminer:
+    image: adminer:5
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports:
+      - "127.0.0.1:8082:8080"
+    networks: [hq]
+
+volumes:
+  db_data:
+
+networks:
+  hq:
+    driver: bridge
