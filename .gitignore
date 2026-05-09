@@ -1,0 +1,26 @@
+.env
+.env.local
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+# Laravel
+**/vendor/
+**/node_modules/
+**/storage/logs/*
+!**/storage/logs/.gitkeep
+**/storage/framework/cache/*
+!**/storage/framework/cache/.gitkeep
+**/storage/framework/sessions/*
+!**/storage/framework/sessions/.gitkeep
+**/storage/framework/views/*
+!**/storage/framework/views/.gitkeep
+**/bootstrap/cache/*.php
+**/.phpunit.cache/
+**/.phpunit.result.cache
+**/coverage/
+**/public/build/
+**/public/hot
+**/.env
+**/.env.local
