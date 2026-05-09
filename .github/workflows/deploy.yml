@@ -1,0 +1,79 @@
+name: deploy
+
+# Triggered manually or by tag.
+# Pushes both images to ECR, then triggers the infra repo's terraform-apply workflow
+# (or applies directly if you wire it inline).
+#
+# REQUIRED REPO SECRETS / VARS — to be set up by Karl with the infra owner ("Moi"):
+#   AWS_OIDC_ROLE_ARN     (GitHub OIDC role to assume)
+#   AWS_REGION            (e.g. eu-west-3)
+#   ECR_REPO_API          (e.g. 123456789012.dkr.ecr.eu-west-3.amazonaws.com/hq-api)
+#   ECR_REPO_ADMIN        (e.g. 123456789012.dkr.ecr.eu-west-3.amazonaws.com/hq-admin)
+#   INFRA_DISPATCH_TOKEN  (PAT with workflow:write on the infra repo)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'prod'
+        type: choice
+        options: [prod]
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  push:
+    name: build-and-push
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api, admin]
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@d70bba72b1f3fd22344832f00baa16ece964efeb # v3.3.0
+
+      - name: Build & push
+        uses: docker/build-push-action@2cdde995de11925a030ce8070c3d77a52ffcf1c0 # v5.3.0
+        with:
+          context: .
+          file: ${{ matrix.service }}/Dockerfile
+          push: true
+          tags: |
+            ${{ matrix.service == 'api' && secrets.ECR_REPO_API || secrets.ECR_REPO_ADMIN }}:${{ github.sha }}
+            ${{ matrix.service == 'api' && secrets.ECR_REPO_API || secrets.ECR_REPO_ADMIN }}:latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+          provenance: true
+          sbom: true
+
+  trigger-infra:
+    name: trigger-infra-apply
+    needs: push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch infra apply
+        env:
+          GH_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+        run: |
+          gh api repos/SquidRings1/projet_final-devsecops/actions/workflows/apply.yml/dispatches \
+            -f ref=main \
+            -f inputs[image_sha]=${{ github.sha }} \
+            -f inputs[environment]=prod
