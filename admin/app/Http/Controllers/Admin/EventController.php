@@ -23,7 +23,7 @@ class EventController extends Controller
 
     public function create(): View
     {
-        return view('admin.events.form', ['event' => new Event()]);
+        return view('admin.events.form', ['event' => new Event]);
     }
 
     public function store(Request $request): RedirectResponse

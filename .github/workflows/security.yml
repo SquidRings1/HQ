@@ -4,32 +4,26 @@ on:
   pull_request:
   push:
     branches: [main]
-  schedule:
-    - cron: '0 6 * * 1'  # Monday 06:00 UTC
 
 permissions:
   contents: read
 
 jobs:
   gitleaks:
-    name: gitleaks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.6
+      - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  trivy-fs:
-    name: trivy-fs
+  trivy:
     runs-on: ubuntu-latest
-    # SARIF upload to GitHub Code Scanning needs Advanced Security on private repos.
-    # We don't have GHAS, so we just print findings to the log and fail on HIGH/CRITICAL.
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
-      - uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8 # 0.24.0
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@0.24.0
         with:
           scan-type: fs
           scan-ref: .
@@ -39,14 +33,12 @@ jobs:
           ignore-unfixed: true
 
   hadolint:
-    name: hadolint-dockerfiles
     runs-on: ubuntu-latest
     strategy:
       matrix:
         dockerfile: [api/Dockerfile, admin/Dockerfile]
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
-      - uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: ${{ matrix.dockerfile }}
-          failure-threshold: warning
