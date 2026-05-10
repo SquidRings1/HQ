@@ -1,16 +1,16 @@
-name: deploy
+name: Deploy Docker images to ECR
 
-# Triggered manually or by tag (v*.*.*).
-# Builds + pushes both images to ECR, then dispatches the infra repo's apply.
+# Triggered manually (with dev/prd choice) or by tag (v*.*.*).
+# Builds + pushes both images to ECR.
 #
-# REQUIRED REPO SECRETS (set in HQ repo Settings → Secrets and variables → Actions):
-#   AWS_ACCESS_KEY_ID       — IAM user with ECR push perms
-#   AWS_SECRET_ACCESS_KEY   — paired secret
-#   ACCOUNT_ID              — 12-digit AWS account ID, used to build ECR URL
-#   INFRA_DISPATCH_TOKEN    — PAT with workflow:write on projet_final-devsecops
+# REQUIRED REPO SECRETS (Settings → Secrets and variables → Actions → Secrets):
+#   AWS_SECRET_KEY          — IAM user secret access key
 #
-# REQUIRED REPO VARIABLES (Settings → Variables):
-#   AWS_REGION              — e.g. eu-west-3 (matches Haris's TF_VAR_REGION)
+# REQUIRED REPO VARIABLES (Settings → Secrets and variables → Actions → Variables):
+#   AWS_ACCESS_KEY          — IAM user access key ID
+#   AWS_REGION              — e.g. eu-west-3
+#   ECR_REPO_API            — full ECR URL, e.g. 123456789012.dkr.ecr.eu-west-3.amazonaws.com/hq-api
+#   ECR_REPO_ADMIN          — full ECR URL for the admin image
 
 on:
   workflow_dispatch:
@@ -18,9 +18,11 @@ on:
       environment:
         description: 'Target environment'
         required: true
-        default: 'prod'
+        default: 'dev'
         type: choice
-        options: [prod]
+        options:
+          - 'dev'
+          - 'prd'
   push:
     tags:
       - 'v*.*.*'
@@ -37,18 +39,18 @@ jobs:
     steps:
       - id: check
         env:
-          AWS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          ACCOUNT: ${{ secrets.ACCOUNT_ID }}
-          REGION: ${{ vars.AWS_REGION }}
-          INFRA_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+          AWS_KEY:    ${{ vars.AWS_ACCESS_KEY }}
+          AWS_SECRET: ${{ secrets.AWS_SECRET_KEY }}
+          REGION:     ${{ vars.AWS_REGION }}
+          ECR_API:    ${{ vars.ECR_REPO_API }}
+          ECR_ADMIN:  ${{ vars.ECR_REPO_ADMIN }}
         run: |
           missing=()
-          [ -n "$AWS_KEY_ID" ]  || missing+=("AWS_ACCESS_KEY_ID (secret)")
-          [ -n "$AWS_SECRET" ]  || missing+=("AWS_SECRET_ACCESS_KEY (secret)")
-          [ -n "$ACCOUNT" ]     || missing+=("ACCOUNT_ID (secret)")
-          [ -n "$REGION" ]      || missing+=("AWS_REGION (variable)")
-          [ -n "$INFRA_TOKEN" ] || missing+=("INFRA_DISPATCH_TOKEN (secret)")
+          [ -n "$AWS_KEY" ]    || missing+=("AWS_ACCESS_KEY (variable)")
+          [ -n "$AWS_SECRET" ] || missing+=("AWS_SECRET_KEY (secret)")
+          [ -n "$REGION" ]     || missing+=("AWS_REGION (variable)")
+          [ -n "$ECR_API" ]    || missing+=("ECR_REPO_API (variable)")
+          [ -n "$ECR_ADMIN" ]  || missing+=("ECR_REPO_ADMIN (variable)")
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::warning title=Deploy not configured::Missing: ${missing[*]}"
             echo "::warning::See deploy.yml header for the required list. Re-run after configuring."
@@ -62,17 +64,20 @@ jobs:
     needs: preflight
     if: needs.preflight.outputs.configured == 'true'
     runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
     strategy:
       matrix:
-        service: [api, admin]
+        service:
+          - api
+          - admin
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
-      - name: Configure AWS credentials (static keys, matches infra repo pattern)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Login to ECR
@@ -89,23 +94,9 @@ jobs:
           file: ${{ matrix.service }}/Dockerfile
           push: true
           tags: |
-            ${{ secrets.ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/hq-${{ matrix.service }}:${{ github.sha }}
+            ${{ matrix.service == 'api' && vars.ECR_REPO_API || vars.ECR_REPO_ADMIN }}:${{ github.sha }}
+            ${{ matrix.service == 'api' && vars.ECR_REPO_API || vars.ECR_REPO_ADMIN }}:latest
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
           provenance: true
           sbom: true
-
-  trigger-infra:
-    name: trigger-infra-apply
-    needs: [preflight, push]
-    if: needs.preflight.outputs.configured == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Dispatch infra apply
-        env:
-          GH_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
-        run: |
-          gh api repos/SquidRings1/projet_final-devsecops/actions/workflows/apply.yml/dispatches \
-            -f ref=main \
-            -f inputs[image_sha]=${{ github.sha }} \
-            -f inputs[environment]=prod
