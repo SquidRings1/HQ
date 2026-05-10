@@ -1,15 +1,8 @@
-name: deploy
+name: Deploy Docker images to ECR
 
 # Triggered manually or by tag.
 # Pushes both images to ECR, then triggers the infra repo's terraform-apply workflow
 # (or applies directly if you wire it inline).
-#
-# REQUIRED REPO SECRETS / VARS — to be set up by Karl with the infra owner ("Moi"):
-#   AWS_OIDC_ROLE_ARN     (GitHub OIDC role to assume)
-#   AWS_REGION            (e.g. eu-west-3)
-#   ECR_REPO_API          (e.g. 123456789012.dkr.ecr.eu-west-3.amazonaws.com/hq-api)
-#   ECR_REPO_ADMIN        (e.g. 123456789012.dkr.ecr.eu-west-3.amazonaws.com/hq-admin)
-#   INFRA_DISPATCH_TOKEN  (PAT with workflow:write on the infra repo)
 
 on:
   workflow_dispatch:
@@ -17,15 +10,16 @@ on:
       environment:
         description: 'Target environment'
         required: true
-        default: 'prod'
+        default: dev
         type: choice
-        options: [prod]
+        options:
+          - dev
+          - prd
   push:
     tags:
       - 'v*.*.*'
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
@@ -34,15 +28,19 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [api, admin]
+        service:
+          - api
+          - admin
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
 
       - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
@@ -57,8 +55,8 @@ jobs:
           file: ${{ matrix.service }}/Dockerfile
           push: true
           tags: |
-            ${{ matrix.service == 'api' && secrets.ECR_REPO_API || secrets.ECR_REPO_ADMIN }}:${{ github.sha }}
-            ${{ matrix.service == 'api' && secrets.ECR_REPO_API || secrets.ECR_REPO_ADMIN }}:latest
+            ${{ matrix.service == 'api' && vars.ECR_REPO_API || vars.ECR_REPO_ADMIN }}:${{ github.sha }}
+            ${{ matrix.service == 'api' && vars.ECR_REPO_API || vars.ECR_REPO_ADMIN }}:latest
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
           provenance: true
