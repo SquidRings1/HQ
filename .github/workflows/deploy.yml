@@ -1,15 +1,16 @@
 name: deploy
 
-# Triggered manually or by tag.
-# Pushes both images to ECR, then triggers the infra repo's terraform-apply workflow
-# (or applies directly if you wire it inline).
+# Triggered manually or by tag (v*.*.*).
+# Builds + pushes both images to ECR, then dispatches the infra repo's apply.
 #
-# REQUIRED REPO SECRETS / VARS — to be set up by Karl with the infra owner ("Moi"):
-#   AWS_OIDC_ROLE_ARN     (GitHub OIDC role to assume)
-#   AWS_REGION            (e.g. eu-west-3)
-#   ECR_REPO_API          (e.g. 123456789012.dkr.ecr.eu-west-3.amazonaws.com/hq-api)
-#   ECR_REPO_ADMIN        (e.g. 123456789012.dkr.ecr.eu-west-3.amazonaws.com/hq-admin)
-#   INFRA_DISPATCH_TOKEN  (PAT with workflow:write on the infra repo)
+# REQUIRED REPO SECRETS (set in HQ repo Settings → Secrets and variables → Actions):
+#   AWS_ACCESS_KEY_ID       — IAM user with ECR push perms
+#   AWS_SECRET_ACCESS_KEY   — paired secret
+#   ACCOUNT_ID              — 12-digit AWS account ID, used to build ECR URL
+#   INFRA_DISPATCH_TOKEN    — PAT with workflow:write on projet_final-devsecops
+#
+# REQUIRED REPO VARIABLES (Settings → Variables):
+#   AWS_REGION              — e.g. eu-west-3 (matches Haris's TF_VAR_REGION)
 
 on:
   workflow_dispatch:
@@ -25,7 +26,6 @@ on:
       - 'v*.*.*'
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
@@ -37,21 +37,21 @@ jobs:
     steps:
       - id: check
         env:
-          AWS_OIDC: ${{ secrets.AWS_OIDC_ROLE_ARN }}
-          REGION: ${{ secrets.AWS_REGION }}
-          ECR_API: ${{ secrets.ECR_REPO_API }}
-          ECR_ADMIN: ${{ secrets.ECR_REPO_ADMIN }}
+          AWS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          ACCOUNT: ${{ secrets.ACCOUNT_ID }}
+          REGION: ${{ vars.AWS_REGION }}
           INFRA_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
         run: |
           missing=()
-          [ -n "$AWS_OIDC" ]    || missing+=("AWS_OIDC_ROLE_ARN")
-          [ -n "$REGION" ]      || missing+=("AWS_REGION")
-          [ -n "$ECR_API" ]     || missing+=("ECR_REPO_API")
-          [ -n "$ECR_ADMIN" ]   || missing+=("ECR_REPO_ADMIN")
-          [ -n "$INFRA_TOKEN" ] || missing+=("INFRA_DISPATCH_TOKEN")
+          [ -n "$AWS_KEY_ID" ]  || missing+=("AWS_ACCESS_KEY_ID (secret)")
+          [ -n "$AWS_SECRET" ]  || missing+=("AWS_SECRET_ACCESS_KEY (secret)")
+          [ -n "$ACCOUNT" ]     || missing+=("ACCOUNT_ID (secret)")
+          [ -n "$REGION" ]      || missing+=("AWS_REGION (variable)")
+          [ -n "$INFRA_TOKEN" ] || missing+=("INFRA_DISPATCH_TOKEN (secret)")
           if [ ${#missing[@]} -gt 0 ]; then
-            echo "::warning title=Deploy not configured::Missing secrets: ${missing[*]}"
-            echo "::warning::See deploy.yml header for the required secret list."
+            echo "::warning title=Deploy not configured::Missing: ${missing[*]}"
+            echo "::warning::See deploy.yml header for the required list. Re-run after configuring."
             echo "configured=false" >> "$GITHUB_OUTPUT"
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
@@ -68,13 +68,15 @@ jobs:
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials (static keys, matches infra repo pattern)
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Login to ECR
+        id: ecr
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
 
       - name: Set up Buildx
@@ -87,8 +89,7 @@ jobs:
           file: ${{ matrix.service }}/Dockerfile
           push: true
           tags: |
-            ${{ matrix.service == 'api' && secrets.ECR_REPO_API || secrets.ECR_REPO_ADMIN }}:${{ github.sha }}
-            ${{ matrix.service == 'api' && secrets.ECR_REPO_API || secrets.ECR_REPO_ADMIN }}:latest
+            ${{ secrets.ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/hq-${{ matrix.service }}:${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
           provenance: true
