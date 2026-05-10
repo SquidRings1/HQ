@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   gitleaks:
@@ -26,20 +25,18 @@ jobs:
   trivy-fs:
     name: trivy-fs
     runs-on: ubuntu-latest
+    # SARIF upload to GitHub Code Scanning needs Advanced Security on private repos.
+    # We don't have GHAS, so we just print findings to the log and fail on HIGH/CRITICAL.
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
       - uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8 # 0.24.0
         with:
           scan-type: fs
           scan-ref: .
-          format: sarif
-          output: trivy.sarif
+          format: table
           severity: HIGH,CRITICAL
+          exit-code: '1'
           ignore-unfixed: true
-      - uses: github/codeql-action/upload-sarif@4fa2a7953630fd2f3fb380f21be14ede0169dd4f # v3.25.5
-        if: always()
-        with:
-          sarif_file: trivy.sarif
 
   hadolint:
     name: hadolint-dockerfiles

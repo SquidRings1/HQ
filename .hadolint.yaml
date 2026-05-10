@@ -1,0 +1,6 @@
+ignored:
+  # Pinning Alpine `apk` package versions is impractical — Alpine purges old
+  # versions from its index quickly, breaking the build the moment a security
+  # update lands upstream. We rely on Trivy in CI + ECR scan-on-push to catch
+  # vulnerable versions instead of pinning at the apk layer.
+  - DL3018
