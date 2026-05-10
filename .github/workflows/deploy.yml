@@ -34,6 +34,7 @@ jobs:
   preflight:
     name: preflight-secrets
     runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
     outputs:
       configured: ${{ steps.check.outputs.configured }}
     steps:
