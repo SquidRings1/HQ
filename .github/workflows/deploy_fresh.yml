@@ -1,4 +1,4 @@
-name: Deploy Docker images to ECR
+name: Deploy Docker images & provisioning
 
 # Triggered manually or by tag.
 # Pushes both images to ECR, then triggers the infra repo's terraform-apply workflow
@@ -62,3 +62,18 @@ jobs:
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
           provenance: true
           sbom: true
+
+  trigger-infra:
+    name: trigger-infra-apply
+    needs: push
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Dispatch infra apply
+        env:
+          GH_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+        run: |
+          gh api repos/SquidRings1/projet_final-devsecops/actions/workflows/apply.yml/dispatches \
+            -f ref=main \
+            -f inputs[image_sha]=${{ github.sha }} \
+            -f inputs[environment]=${{ github.event.inputs.environment }}
