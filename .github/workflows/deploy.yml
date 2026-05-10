@@ -10,11 +10,11 @@ on:
       environment:
         description: 'Target environment'
         required: true
-        default: dev
+        default: 'dev'
         type: choice
         options:
-          - dev
-          - prd
+          - 'dev'
+          - 'prd'
   push:
     tags:
       - 'v*.*.*'
