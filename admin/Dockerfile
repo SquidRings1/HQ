@@ -29,7 +29,7 @@ RUN apk add --no-cache \
         oniguruma \
         libzip \
     && apk add --no-cache --virtual .build-deps \
-        $PHPIZE_DEPS \
+        "$PHPIZE_DEPS" \
         icu-dev \
         oniguruma-dev \
         libzip-dev \

@@ -1,11 +1,9 @@
-name: ci-api
+name: ci
 
 on:
   pull_request:
-    paths: ['api/**', '.github/workflows/ci-api.yml']
   push:
     branches: [main]
-    paths: ['api/**', '.github/workflows/ci-api.yml']
 
 permissions:
   contents: read
@@ -13,9 +11,13 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, admin]
     defaults:
       run:
-        working-directory: api
+        working-directory: ${{ matrix.service }}
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
