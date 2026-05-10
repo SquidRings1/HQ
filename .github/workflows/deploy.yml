@@ -29,8 +29,38 @@ permissions:
   contents: read
 
 jobs:
+  preflight:
+    name: preflight-secrets
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - id: check
+        env:
+          AWS_OIDC: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          REGION: ${{ secrets.AWS_REGION }}
+          ECR_API: ${{ secrets.ECR_REPO_API }}
+          ECR_ADMIN: ${{ secrets.ECR_REPO_ADMIN }}
+          INFRA_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+        run: |
+          missing=()
+          [ -n "$AWS_OIDC" ]    || missing+=("AWS_OIDC_ROLE_ARN")
+          [ -n "$REGION" ]      || missing+=("AWS_REGION")
+          [ -n "$ECR_API" ]     || missing+=("ECR_REPO_API")
+          [ -n "$ECR_ADMIN" ]   || missing+=("ECR_REPO_ADMIN")
+          [ -n "$INFRA_TOKEN" ] || missing+=("INFRA_DISPATCH_TOKEN")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::warning title=Deploy not configured::Missing secrets: ${missing[*]}"
+            echo "::warning::See deploy.yml header for the required secret list."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
   push:
     name: build-and-push
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -66,7 +96,8 @@ jobs:
 
   trigger-infra:
     name: trigger-infra-apply
-    needs: push
+    needs: [preflight, push]
+    if: needs.preflight.outputs.configured == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch infra apply
