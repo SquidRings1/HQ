@@ -34,34 +34,47 @@ class MobileShimController extends Controller
             'Email' => ['nullable', 'email'],
         ]);
 
-        $country = self::normalizeCountryCode($data['CountryCode']);
-        $phone = self::normalizePhone($data['MobileNumber']);
+        try {
+            $country = self::normalizeCountryCode($data['CountryCode']);
+            $phone = self::normalizePhone($data['MobileNumber']);
 
-        $existing = User::where('country_code', $country)->where('phone', $phone)->first();
-        if ($existing) {
-            return response()->json(['status' => 0, 'message' => 'User already exists', 'data' => []], 422);
+            $existing = User::where('country_code', $country)->where('phone', $phone)->first();
+            if ($existing) {
+                return response()->json(['status' => 0, 'message' => 'User already exists', 'data' => []], 422);
+            }
+
+            $providedEmail = $data['Email'] ?? null;
+            $email = $providedEmail ?: "{$country}_{$phone}@hq.local";
+            $firstName = $data['FirstName'] ?? '';
+            $lastName = $data['LastName'] ?? '';
+            $name = trim($firstName.' '.$lastName);
+
+            $user = User::create([
+                'name' => $name !== '' ? $name : $email,
+                'email' => $email,
+                'password' => Hash::make(Str::random(40)), // never used; login is passwordless
+                'country_code' => $country,
+                'phone' => $phone,
+                'fname' => $firstName,
+                'lname' => $lastName,
+            ]);
+
+            $token = $user->createToken('mobile')->plainTextToken;
+
+            return response()->json([
+                'status' => 1,
+                'message' => 'Registration completed successfully',
+                'data' => self::userPayload($user, $token),
+            ]);
+        } catch (\Throwable $e) {
+            // School demo: surface the real error so we can debug from the response.
+            return response()->json([
+                'status' => 0,
+                'message' => 'register failed: '.$e->getMessage(),
+                'class' => get_class($e),
+                'file' => basename($e->getFile()).':'.$e->getLine(),
+            ], 500);
         }
-
-        $email = $data['Email'] ?: "{$country}_{$phone}@hq.local";
-        $name = trim(($data['FirstName'] ?? '').' '.($data['LastName'] ?? ''));
-
-        $user = User::create([
-            'name' => $name,
-            'email' => $email,
-            'password' => Hash::make(Str::random(40)), // never used; login is passwordless
-            'country_code' => $country,
-            'phone' => $phone,
-            'fname' => $data['FirstName'] ?? '',
-            'lname' => $data['LastName'] ?? '',
-        ]);
-
-        $token = $user->createToken('mobile')->plainTextToken;
-
-        return response()->json([
-            'status' => 1,
-            'message' => 'Registration completed successfully',
-            'data' => self::userPayload($user, $token),
-        ]);
     }
 
     public function login(Request $request): JsonResponse
