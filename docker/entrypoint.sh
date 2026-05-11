@@ -18,11 +18,6 @@ if [ -n "${DB_HOST:-}" ] && [ -n "${DB_PORT:-}" ]; then
     echo "DB is up"
 fi
 
-# Generate APP_KEY only if missing AND not provided via env
-if [ -z "${APP_KEY:-}" ] && [ ! -f .env ]; then
-    php artisan key:generate --show > /tmp/genkey 2>/dev/null || true
-fi
-
 # Migrations: only the service marked DB_OWNER=true runs them.
 # In prod, admin owns the schema; api just consumes it.
 if [ "${DB_OWNER:-false}" = "true" ] && [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
