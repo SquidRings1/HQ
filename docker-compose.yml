@@ -99,7 +99,7 @@ services:
     networks: [hq]
 
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
+    image: gcr.io/cadvisor/cadvisor:v0.55.1
     container_name: cadvisor
     privileged: true
     volumes:
@@ -112,24 +112,25 @@ services:
     networks: [hq]
 
   prometheus:
-    image: prom/prometheus:latest
+    build:
+      context: ./docker/prometheus
+      dockerfile: Dockerfile
+    image: hq-prometheus:local
     container_name: prometheus
     volumes:
-      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     ports:
       - "127.0.0.1:9090:9090"
     networks: [hq]
 
   grafana:
-    image: grafana/grafana:latest
+    build:
+      context: ./docker/grafana
+      dockerfile: Dockerfile
+    image: hq-grafana:local
     container_name: grafana
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
-    volumes:
-      - ./docker/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
-      - ./docker/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
-      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards
     ports:
       - "3000:3000"
     networks: [hq]
