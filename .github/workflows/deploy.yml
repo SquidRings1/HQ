@@ -103,3 +103,28 @@ jobs:
           provenance: true
           sbom: true
 
+  rollout:
+    name: force-ecs-rollout
+    needs: push
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    env:
+      ENV: ${{ github.event.inputs.environment || 'dev' }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Force ECS rollout
+        run: |
+          for svc in api admin; do
+            aws ecs update-service \
+              --cluster "gocyc-${ENV}-ecs-cluster" \
+              --service "${ENV}-service-${svc}" \
+              --force-new-deployment \
+              --region "${{ vars.AWS_REGION }}" \
+              --query 'service.deployments[0].[status,rolloutState]' --output text
+          done
