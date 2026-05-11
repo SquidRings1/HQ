@@ -18,6 +18,11 @@ return Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Cloudflare is in front; trust it so X-Forwarded-Proto is honored.
+        // Without this, Laravel sees the origin's HTTP request and CSRF /
+        // session cookie / scheme detection breaks behind a TLS-terminating proxy.
+        $middleware->trustProxies(at: '*');
+
         $middleware->web(append: [
             SecurityHeaders::class,
         ]);
