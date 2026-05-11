@@ -29,6 +29,7 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::middleware('throttle:auth')->group(function () {
     Route::post('/register', [MobileShimController::class, 'register']);
     Route::post('/login', [MobileShimController::class, 'login']);
+    Route::post('/validate-user', [MobileShimController::class, 'validateUser']);
 });
 
 Route::middleware('auth:sanctum')->group(function () {

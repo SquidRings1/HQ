@@ -85,7 +85,8 @@ class MobileShimController extends Controller
         ]);
 
         $phone = self::normalizePhone($data['MobileNumber']);
-        $query = User::where('phone', $phone);
+        $variants = self::phoneVariants($phone);
+        $query = User::whereIn('phone', $variants);
         if (! empty($data['CountryCode'])) {
             $query->where('country_code', self::normalizeCountryCode($data['CountryCode']));
         }
@@ -103,6 +104,57 @@ class MobileShimController extends Controller
             'status' => 1,
             'message' => 'User logged in successfully',
             'data' => self::userPayload($user, $token),
+        ]);
+    }
+
+    public function validateUser(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'CountryCode' => ['required', 'string', 'max:8'],
+            'MobileNumber' => ['required', 'regex:/^[0-9\s\-\+\(\)]+$/'],
+            'Email' => ['nullable', 'email'],
+            'Mode' => ['nullable', 'in:signup,login'],
+        ]);
+
+        $country = self::normalizeCountryCode($data['CountryCode']);
+        $phone = self::normalizePhone($data['MobileNumber']);
+        $email = trim((string) ($data['Email'] ?? ''));
+        $mode = $data['Mode'] ?? ($email !== '' ? 'signup' : 'legacy-login');
+
+        $phoneExists = User::where('country_code', $country)
+            ->whereIn('phone', self::phoneVariants($phone))
+            ->exists();
+
+        if ($mode === 'login') {
+            return $phoneExists
+                ? response()->json(['status' => 1, 'message' => 'Phone number is registered', 'data' => ['PhoneExists' => true]])
+                : response()->json(['status' => 0, 'message' => 'No account found for this phone number', 'data' => ['PhoneExists' => false]]);
+        }
+
+        // signup / legacy-login: phone must NOT exist
+        if ($phoneExists) {
+            return response()->json([
+                'status' => 0,
+                'message' => 'This phone number is already registered',
+                'data' => ['PhoneExists' => true],
+            ]);
+        }
+
+        if ($email !== '') {
+            $emailExists = User::whereRaw('LOWER(email) = ?', [strtolower($email)])->exists();
+            if ($emailExists) {
+                return response()->json([
+                    'status' => 0,
+                    'message' => 'This email is already registered',
+                    'data' => ['PhoneExists' => false, 'EmailExists' => true],
+                ]);
+            }
+        }
+
+        return response()->json([
+            'status' => 1,
+            'message' => 'Credentials are available',
+            'data' => ['PhoneExists' => false, 'EmailExists' => false],
         ]);
     }
 
@@ -198,5 +250,16 @@ class MobileShimController extends Controller
     private static function normalizePhone(string $phone): string
     {
         return preg_replace('/\D+/', '', $phone) ?? '';
+    }
+
+    /**
+     * Return phone variants we'll accept for lookup: as-stored, leading-zero
+     * stripped, and re-prefixed with 0. Matches the production gocyc backend.
+     */
+    private static function phoneVariants(string $phone): array
+    {
+        $stripped = ltrim($phone, '0');
+
+        return array_values(array_unique(array_filter([$phone, $stripped, '0'.$stripped])));
     }
 }
