@@ -21,6 +21,7 @@ FROM php:8.4-fpm-alpine AS runtime
 ARG SERVICE=api
 ENV APP_SERVICE=${SERVICE}
 
+# hadolint ignore=SC2086
 RUN apk add --no-cache \
         nginx \
         supervisor \
@@ -28,7 +29,6 @@ RUN apk add --no-cache \
         icu-libs \
         oniguruma \
         libzip \
-    # hadolint ignore=SC2086
     && apk add --no-cache --virtual .build-deps \
         $PHPIZE_DEPS \
         icu-dev \
