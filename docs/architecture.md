@@ -1,66 +1,55 @@
 # Architecture
 
-## Overview
+## Two services
 
 ```
-                     Internet (HTTPS only)
-                            │
-                     ┌──────▼──────┐
-                     │     ALB     │  ACM cert, WAF managed rules
-                     └──────┬──────┘
-                ┌───────────┴───────────┐
-            /api/* host                  /admin/* host
-                │                           │
-          ┌─────▼─────┐               ┌─────▼─────┐
-          │ ECS Fargate                ECS Fargate │
-          │ hq-api task                hq-admin    │   private subnets
-          │ (nginx + php-fpm)          (same)      │   IAM task role
-          └─────┬─────┘               └─────┬─────┘
-                └───────────┬───────────────┘
-                            │   :3306 (private SG)
-                      ┌─────▼─────┐
-                      │    RDS    │   MariaDB, encrypted, backups, no public IP
-                      └───────────┘
+                            ┌────────────┐
+                            │  /admin/*  │  ──►  admin/  (Laravel 12, web sessions)
+                            │            │       Blade UI, AdminUser guard
+       Reverse proxy /      │            │       owns the DB schema (migrations)
+       ALB in prod   ──────►┤            │
+                            │  /api/*    │  ──►  api/    (Laravel 12, Sanctum tokens)
+                            │            │       JSON only, mobile / external
+                            └────────────┘
 
-  Secrets:  AWS Secrets Manager (DB password, APP_KEY, future: Stripe/SAML stubs)
-  Images:   ECR with scan-on-push + Trivy gate in CI
-  Logs:     stdout → CloudWatch Logs → Grafana / Splunk (Iban)
-  CI/CD:    GitHub Actions → OIDC → AWS (no static keys)
+                                    │
+                                    ▼  shared schema
+                            ┌────────────┐
+                            │  MariaDB   │   (mariadb container in dev,
+                            │            │    RDS in prod — same engine)
+                            └────────────┘
 ```
 
-## Why two services and not one?
+Both services run the same image type (nginx + php-fpm-alpine + supervisord),
+only differ by the `Dockerfile` build stage that pulls their respective `api/`
+or `admin/` source tree.
 
-The legacy gocyc monolith bundles the mobile API and the admin panel into one
-Laravel app. Three problems with that for our DevSecOps target:
+## Why two services and not one
 
-1. **Blast radius** — an exploit in admin (Blade XSS, session theft) shouldn't
-   give attackers the same process that serves the mobile API.
-2. **Dependency surface** — admin needs Blade/views/sessions; the API doesn't.
-   Shipping admin code in the API container = bigger Trivy attack surface.
-3. **Independent deploys + scaling** — Karl can deploy admin without touching
-   the live mobile fleet, and ECS can autoscale them independently.
+- **Blast radius** — an exploit in admin (Blade XSS, session theft) shouldn't
+  give the same process the mobile API runs in.
+- **Dependency surface** — admin needs Blade/views/sessions; the API doesn't.
+  Shipping admin code in the API container = bigger Trivy attack surface.
+- **Independent deploys + scaling** — admin can be redeployed without touching
+  the live mobile fleet, and ECS can autoscale them independently.
 
-We accept the cost: two images, two ECS services, slight schema-coupling
-(both speak to the same RDS — admin owns migrations, api consumes).
+The cost: two images, two services, slight schema-coupling (both speak to the
+same DB — admin owns migrations, api consumes).
 
-## Why Laravel 12 fresh-write instead of stripping the monolith?
+## Dev orchestrator vs prod orchestrator
 
-The legacy `EventController` was 5,214 lines and bound to ~70 other models.
-Stripping in place would leave dead references everywhere and make security
-review impossible. A fresh skeleton with only the demo flow ported is cleaner
-to defend at the soutenance and has a smaller attack surface.
+The `docker-compose.yml` is the dev shim — it spins up `mariadb` + `admin` +
+`api` + `adminer` for local work. **It is not used in production.**
 
-## Why MariaDB on RDS instead of a containerized DB?
+In prod, ECS task definitions take compose's place: same images, different env
+vars (`APP_ENV=production`, `DB_HOST=<rds-endpoint>`, `DB_PASSWORD` from
+Secrets Manager, no Adminer). The image itself is environment-agnostic — it
+reads everything from runtime env, so the same artifact ships from `compose
+up` to `terraform apply`.
 
-The spec asks for "Backend MariaDB" container. We exceed it with managed RDS:
-
-- **Encryption at rest** by default (AWS-managed KMS).
-- **Automated backups + point-in-time recovery** without us writing logic.
-- **No DB credentials in image or compose** — pulled from Secrets Manager at
-  task start.
-- **Private SG** — only ECS task SG can talk to RDS:3306.
-
-Local dev still uses a `mariadb:11` container for parity.
+This split is intentional: keeps the Docker image free of env-specific code,
+keeps the dev loop trivial, keeps the prod orchestration with the team owning
+the cloud (Haris).
 
 ## Decision records
 
@@ -70,19 +59,17 @@ Local dev still uses a `mariadb:11` container for parity.
 | 2 | Single container per service (nginx + php-fpm + supervisord) | Simpler than multi-container, still production-grade |
 | 3 | `admin/` owns the schema migrations | One source of truth; api just reads |
 | 4 | Sanctum for api (bearer), web sessions for admin | Right tool per surface |
-| 5 | RDS over containerized MariaDB | Encryption, backups, no creds in image |
-| 6 | OIDC for GH Actions → AWS | No long-lived access keys |
-| 7 | Per-service CI workflows with `paths` filter | A CVE in api/ shouldn't block admin/ deploys |
-| 8 | Image promoted by SHA, not rebuilt | Same artifact in staging and prod |
+| 5 | `docker-compose.yml` is dev-only; prod uses ECS task defs | Same image, env-injected config; no env-specific code in image |
+| 6 | Per-service CI workflows with `paths` filter | A CVE in api/ shouldn't block admin/ deploys |
+| 7 | Image promoted by SHA, not rebuilt per env | Same artifact in dev/staging/prod; reproducibility |
+| 8 | Third-party GitHub Actions pinned to commit SHA | Supply chain — tags can be moved, SHAs cannot |
 
-## Shared service contracts
+## Hand-offs (HQ-side contracts the rest of the team consumes)
 
-These are the contracts between Rayan (HQ) and "Moi" (infra) — change here = coordinate.
-
-- **Health endpoint**: each container exposes `GET /healthz` returning 200 with
-  a DB ping. ALB target group uses this.
+- **Health endpoint**: each container exposes `GET /healthz` returning 200.
+  Used by Docker `HEALTHCHECK` locally and by ALB target group in prod.
 - **Listen port**: 8080 inside container.
-- **Logs**: JSON to stdout (nginx + Laravel both).
-- **Migrations**: deploy pipeline runs `php artisan migrate --force` once via
-  ECS one-shot task, **before** rolling new admin/api images.
-- **Secrets**: see [`secrets-contract.md`](secrets-contract.md).
+- **Logs**: JSON to stdout (nginx access via `log_format json`, Laravel via
+  `LOG_CHANNEL=stderr`).
+- **Migrations**: only admin runs them (`DB_OWNER=true`). In prod, this is a
+  one-shot ECS task triggered before rolling new images.

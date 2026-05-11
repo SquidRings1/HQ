@@ -1,6 +1,6 @@
-# HQ — GoCyc microservices (DevSecOps final)
+# HQ — Event services
 
-Two Laravel 12 services split out of the legacy gocyc monolith:
+Two Laravel 12 services for the GoCyc event flow:
 
 | Service | Port (local) | Purpose |
 |---|---|---|
@@ -9,7 +9,7 @@ Two Laravel 12 services split out of the legacy gocyc monolith:
 | `db`      | `3306` | MariaDB 11, shared schema |
 | `adminer` | `8082` | DB browser (dev only) |
 
-The schema is owned by `admin/` (it runs the migrations); `api/` consumes it.
+Schema is owned by `admin/` (it runs the migrations); `api/` consumes it.
 
 ## Local run
 
@@ -19,7 +19,7 @@ docker compose build
 docker compose up -d
 ```
 
-First boot will run admin migrations + seed the demo data:
+First boot runs admin migrations + seeds the demo data:
 
 | Account            | Email              | Password         |
 |--------------------|--------------------|------------------|
@@ -30,12 +30,12 @@ First boot will run admin migrations + seed the demo data:
 - API base:    <http://localhost:8080/api>
 - Adminer:     <http://localhost:8082> (server `db`, user `hq`)
 
-## Demo flow (the soutenance script)
+## Demo flow
 
 ```bash
-# 1. Admin logs in via browser to http://localhost:8081/admin/login
+# 1. Admin logs in via browser at http://localhost:8081/admin/login
 
-# 2. From the API: register or log in
+# 2. From the API: log in as the demo rider
 curl -s -X POST http://localhost:8080/api/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"rider@hq.local","password":"RiderDemo123!"}' | jq .
@@ -43,8 +43,7 @@ curl -s -X POST http://localhost:8080/api/auth/login \
 # 3. List upcoming events
 curl -s http://localhost:8080/api/events | jq .
 
-# 4. Join one
-TOKEN=...   # from step 2
+# 4. Join one (TOKEN from step 2)
 curl -s -X POST http://localhost:8080/api/events/1/join \
   -H "Authorization: Bearer $TOKEN" | jq .
 
@@ -60,29 +59,22 @@ HQ/
 ├── docker/              # Shared nginx + php-fpm + supervisord configs
 ├── docker-compose.yml   # Local dev orchestration
 ├── .github/workflows/   # ci-api, ci-admin, security, deploy
-└── docs/                # architecture, secrets-contract, threat-model, demo-runbook
+└── docs/                # architecture, threat-model, demo-runbook
 ```
 
-The matching infra repo (Terraform module + composition) lives at
-[`SquidRings1/projet_final-devsecops`](https://github.com/SquidRings1/projet_final-devsecops).
-The deploy pipeline (`.github/workflows/deploy.yml`) pushes images to ECR and
-dispatches that repo's `apply.yml` to roll the new image.
-
 ## Security posture
-
-See [`docs/threat-model.md`](docs/threat-model.md) for the full STRIDE pass.
 
 App-layer:
 - Sanctum bearer tokens (api), session auth (admin), bcrypt + cast `'password' => 'hashed'`.
 - Form Request validation everywhere — no raw input touches Eloquent.
-- Rate-limited auth + join endpoints.
-- `SecurityHeaders` middleware: CSP, HSTS, X-Frame-Options, Referrer-Policy.
+- Rate-limited auth + join endpoints (per-IP and per-user).
+- `SecurityHeaders` middleware: CSP (admin), HSTS, X-Frame-Options, Referrer-Policy.
 - CSRF on admin (default), no CSRF on api (token auth).
 
 Container:
 - Multi-stage build, only artifacts in runtime image.
-- `php:8.4-fpm-alpine` base, no shell needed in runtime.
-- `www-data` runs nginx + php-fpm (supervisord is PID 1).
+- `php:8.4-fpm-alpine` base.
+- nginx + php-fpm workers run as `www-data`.
 - `expose_php = Off`, `display_errors = Off`, opcache enabled.
 - `.dockerignore` excludes `.env`, tests, git, node_modules.
 - Trivy scan in CI gates HIGH/CRITICAL CVEs.
@@ -90,12 +82,5 @@ Container:
 CI/CD:
 - Per-service workflows (`ci-api`, `ci-admin`).
 - `security.yml`: gitleaks, trivy-fs (SARIF → Code Scanning), hadolint.
-- Deploy via OIDC (no static AWS keys).
+- Deploy via OIDC (no static AWS keys), build-once-promote-by-SHA.
 - Third-party actions pinned to commit SHAs.
-
-## CLAUDE.md / docs
-
-- `docs/architecture.md` — component diagram + decision record
-- `docs/secrets-contract.md` — what `api/` + `admin/` expect from Secrets Manager
-- `docs/threat-model.md` — STRIDE pass per component
-- `docs/demo-runbook.md` — full soutenance script with fallbacks

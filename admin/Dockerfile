@@ -28,12 +28,13 @@ RUN apk add --no-cache \
         icu-libs \
         oniguruma \
         libzip \
+    # hadolint ignore=SC2086
     && apk add --no-cache --virtual .build-deps \
         $PHPIZE_DEPS \
         icu-dev \
         oniguruma-dev \
         libzip-dev \
-    && docker-php-ext-install -j$(nproc) \
+    && docker-php-ext-install -j"$(nproc)" \
         pdo_mysql \
         intl \
         bcmath \
@@ -48,7 +49,7 @@ COPY --from=vendor --chown=www-data:www-data /app /var/www/html
 
 COPY docker/php/php.ini /usr/local/etc/php/conf.d/zz-app.ini
 COPY docker/php/www.conf /usr/local/etc/php-fpm.d/zz-www.conf
-COPY docker/nginx/admin.conf /etc/nginx/http.d/default.conf
+COPY docker/nginx/site.conf /etc/nginx/http.d/default.conf
 COPY docker/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY docker/supervisord.conf /etc/supervisord.conf
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh

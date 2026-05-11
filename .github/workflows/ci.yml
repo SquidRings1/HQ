@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, admin]
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, intl, bcmath, zip
+          tools: composer:v2
+
+      - run: composer install --prefer-dist --no-interaction --no-progress
+      - run: vendor/bin/pint --test
+      - run: vendor/bin/phpunit --colors=never
+        env:
+          APP_KEY: base64:naJ3OY6MePDAv9VNSVhQxoF9DnbbVSponKqNwk0XVlI=
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'

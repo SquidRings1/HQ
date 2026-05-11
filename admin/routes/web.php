@@ -7,6 +7,8 @@ use Illuminate\Support\Facades\Route;
 
 Route::redirect('/', '/admin');
 
+Route::get('/healthz', fn () => response()->json(['ok' => true]));
+
 Route::prefix('admin')->name('admin.')->group(function () {
     Route::middleware('guest')->group(function () {
         Route::get('login', [AuthController::class, 'showLogin'])->name('login');
