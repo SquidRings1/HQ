@@ -1,0 +1,61 @@
+name: Apply infra
+
+# Manual-only: triggered from Actions → "Apply infra" → Run workflow.
+# Checks out the infra repo and runs terraform apply against the chosen env.
+#
+# REQUIRED SECRETS:
+#   AWS_SECRET_KEY          — IAM user secret access key
+#   INFRA_REPO_TOKEN        — PAT with `repo` scope on SquidRings1/projet_final-devsecops
+#
+# REQUIRED VARIABLES:
+#   AWS_ACCESS_KEY          — IAM user access key ID
+#   AWS_REGION              — e.g. eu-west-3
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - 'dev'
+          - 'prd'
+
+permissions:
+  contents: read
+
+jobs:
+  terraform-apply:
+    name: terraform-apply
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    env:
+      ENV: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Checkout infra repo
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          repository: SquidRings1/projet_final-devsecops
+          ref: main
+          token: ${{ secrets.INFRA_REPO_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.5.7
+          terraform_wrapper: false
+
+      - name: Terraform apply
+        working-directory: terraform
+        run: |
+          terraform init -backend-config=env/${ENV}/backend.tfbackend
+          terraform apply -var-file=env/${ENV}/terraform.tfvars -auto-approve
