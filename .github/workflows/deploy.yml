@@ -109,7 +109,9 @@ jobs:
     name: terraform-apply
     needs: push
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment }}
+    # Gated by the `terraform-apply` GitHub environment.
+    # Add required reviewers in repo Settings → Environments to get a manual approval button.
+    environment: terraform-apply
     env:
       ENV: ${{ github.event.inputs.environment || 'dev' }}
     steps:
