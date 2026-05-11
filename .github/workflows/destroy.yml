@@ -1,0 +1,65 @@
+name: Infra Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Env to destroy'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prd
+        default: dev
+      confirm:
+        description: 'Type "destroy-<env>" worr4worr (destroy-dev)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Confirmation Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify confirmation string
+        env:
+          EXPECTED: destroy-${{ github.event.inputs.environment }}
+          PROVIDED: ${{ github.event.inputs.confirm }}
+        run: |
+          if [ "$PROVIDED" != "$EXPECTED" ]; then
+            echo "::error::Confirmation failed. Expected: $EXPECTED -> got: $PROVIDED"
+            exit 1
+          fi
+          echo "Confirmation OK -> proceeding..."
+
+  terraform-destroy:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+    needs: guard
+    environment: ${{ github.event.inputs.environment }}
+    env:
+      ENV: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.7
+
+      - name: Terraform Destroy
+        working-directory: terraform
+        run: |
+          terraform init -backend-config=env/${ENV}/backend.tfbackend
+          terraform destroy -var-file=env/${ENV}/terraform.tfvars -auto-approve
