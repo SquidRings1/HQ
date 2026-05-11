@@ -98,8 +98,46 @@ services:
       - "127.0.0.1:8082:8080"
     networks: [hq]
 
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.55.1
+    container_name: cadvisor
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    ports:
+      - "127.0.0.1:8083:8080"
+    networks: [hq]
+
+  prometheus:
+    build:
+      context: ./docker/prometheus
+      dockerfile: Dockerfile
+    image: hq-prometheus:local
+    container_name: prometheus
+    volumes:
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks: [hq]
+
+  grafana:
+    build:
+      context: ./docker/grafana
+      dockerfile: Dockerfile
+    image: hq-grafana:local
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+    ports:
+      - "3000:3000"
+    networks: [hq]
+
 volumes:
   db_data:
+  prometheus_data:
 
 networks:
   hq:
